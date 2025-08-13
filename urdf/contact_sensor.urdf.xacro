@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="contact_sensor_robot">
+  <link name="base_link"/>
+  <ros2_control name="FootContactSystem" type="sensor">
+    <hardware>
+      <plugin>contact_sensor_hardware_interface/ContactSensor</plugin>
+      <param name="udp_port">5005</param>
+    </hardware>
+    <!-- „pseudo-joint” po to, żeby joint_state_broadcaster publikował /joint_states -->
+    <joint name="foot_contact_joint">
+      <state_interface name="position"/>
+    </joint>
+  </ros2_control>
+</robot>

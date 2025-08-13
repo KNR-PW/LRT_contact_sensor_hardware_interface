@@ -1,0 +1,8 @@
+<library path="libpressure_sensor_hardware_interface">
+  <class
+    name="pressure_sensor_hardware_interface/PressureSensor"
+    type="pressure_sensor_hardware_interface::PressureSensor"
+    base_class_type="hardware_interface::SensorInterface">
+    <description>UDP foot contact sensor hardware interface</description>
+  </class>
+</library>
