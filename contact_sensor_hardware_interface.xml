@@ -1,0 +1,6 @@
+<library path="contact_sensor_hardware_interface">
+  <class
+    type="contact_sensor::ContactSensor"
+    base_class_type="hardware_interface::SensorInterface"
+    description="Boolean contact sensor over UDP"/>
+</library>

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<robot name="contact_sensor" xmlns:xacro="http://ros.org/wiki/xacro">
+  <ros2_control name="ContactSensor" type="sensor">
+    <hardware>
+      <plugin>contact_sensor::ContactSensor</plugin>
+      <param name="bind_port">5005</param>
+    </hardware>
+    <sensor name="foot_contact">
+      <state_interface name="contact"/>
+    </sensor>
+  </ros2_control>
+
+</robot>
