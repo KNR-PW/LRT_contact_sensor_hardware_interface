@@ -1,13 +1,14 @@
 #include "contact_hardware_interface.hpp"
 
-namespace contact_sensor
+namespace contact_sensor_hardware_interface
+
 {
 
 using hardware_interface::CallbackReturn;
 using hardware_interface::return_type;
 using hardware_interface::StateInterface;
 
-ContactSensor::~ContactSensor()
+ContactSensorHardwareInterface::~ContactSensorHardwareInterface()
 {
   if (rx_running_.exchange(false)) {
     close_udp();
@@ -18,38 +19,38 @@ ContactSensor::~ContactSensor()
   connected_.store(false);
 }
 
-CallbackReturn ContactSensor::on_init(const hardware_interface::HardwareInfo& hardware_info)
+CallbackReturn ContactSensorHardwareInterface::on_init(const hardware_interface::HardwareInfo& hardware_info)
 {
   if (hardware_interface::SensorInterface::on_init(hardware_info) != CallbackReturn::SUCCESS) {
     return CallbackReturn::ERROR;
   }
 
   if (hardware_info.sensors.empty()) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"), "No <sensor> entries in ros2_control block.");
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"), "No <sensor> entries in ros2_control block.");
     return CallbackReturn::ERROR;
   }
   if (hardware_info.sensors[0].state_interfaces.empty() ||
       hardware_info.sensors[0].state_interfaces[0].name != "contact") {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "Expected state_interface named 'contact' for the first sensor.");
     return CallbackReturn::ERROR;
   }
 
   auto it = hardware_info.hardware_parameters.find("bind_port");
   if (it == hardware_info.hardware_parameters.end()) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"), "Missing parameter: bind_port");
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"), "Missing parameter: bind_port");
     return CallbackReturn::ERROR;
   }
 
   try {
     serverPortNum_ = std::stoi(it->second);
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "bind_port is not a valid integer: %s", e.what());
     return CallbackReturn::ERROR;
   }
   if (serverPortNum_ < 1 || serverPortNum_ > 65535) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "bind_port out of range: %d", serverPortNum_);
     return CallbackReturn::ERROR;
   }
@@ -61,11 +62,11 @@ CallbackReturn ContactSensor::on_init(const hardware_interface::HardwareInfo& ha
   return CallbackReturn::SUCCESS;
 }
 
-CallbackReturn ContactSensor::on_activate(const rclcpp_lifecycle::State& previous_state)
+CallbackReturn ContactSensorHardwareInterface::on_activate(const rclcpp_lifecycle::State& previous_state)
 {
   (void)previous_state; 
   if (connected_.load(std::memory_order_relaxed)) {
-    RCLCPP_INFO(rclcpp::get_logger("ContactSensor"), "Already connected.");
+    RCLCPP_INFO(rclcpp::get_logger("ContactSensorHardwareInterface"), "Already connected.");
     return CallbackReturn::SUCCESS;
   }
 
@@ -75,11 +76,11 @@ CallbackReturn ContactSensor::on_activate(const rclcpp_lifecycle::State& previou
 
   bool expected = false;
   if (!rx_running_.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
-    RCLCPP_INFO(rclcpp::get_logger("ContactSensor"), "RX thread already running.");
+    RCLCPP_INFO(rclcpp::get_logger("ContactSensorHardwareInterface"), "RX thread already running.");
     return CallbackReturn::SUCCESS;
   }
 
-  rx_thread_ = std::thread(&ContactSensor::rx_thread_fn, this);
+  rx_thread_ = std::thread(&ContactSensorHardwareInterface::rx_thread_fn, this);
 
   const uint64_t start_seq = state_seq_.load(std::memory_order_relaxed);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -94,7 +95,7 @@ CallbackReturn ContactSensor::on_activate(const rclcpp_lifecycle::State& previou
   }
 
   if (!got_first) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "Failed to receive first sensor packet (timeout).");
     rx_running_.store(false, std::memory_order_relaxed);
     close_udp();
@@ -103,12 +104,12 @@ CallbackReturn ContactSensor::on_activate(const rclcpp_lifecycle::State& previou
   }
 
   connected_.store(true, std::memory_order_relaxed);
-  RCLCPP_INFO(rclcpp::get_logger("ContactSensor"),
+  RCLCPP_INFO(rclcpp::get_logger("ContactSensorHardwareInterface"),
               "Contact sensor activated (UDP %d).", serverPortNum_);
   return CallbackReturn::SUCCESS;
 }
 
-CallbackReturn ContactSensor::on_deactivate(const rclcpp_lifecycle::State& previous_state)
+CallbackReturn ContactSensorHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previous_state)
 {
   (void)previous_state; 
   const bool was_running = rx_running_.exchange(false, std::memory_order_relaxed);
@@ -117,14 +118,14 @@ CallbackReturn ContactSensor::on_deactivate(const rclcpp_lifecycle::State& previ
     rx_thread_.join();
   }
   connected_.store(false, std::memory_order_relaxed);
-  RCLCPP_INFO(rclcpp::get_logger("ContactSensor"), "Contact sensor deactivated.");
+  RCLCPP_INFO(rclcpp::get_logger("ContactSensorHardwareInterface"), "Contact sensor deactivated.");
   return CallbackReturn::SUCCESS;
 }
 
-std::vector<StateInterface> ContactSensor::export_state_interfaces()
+std::vector<StateInterface> ContactSensorHardwareInterface::export_state_interfaces()
 {
   if (info_.sensors.empty()) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "No sensors in hardware info.");
     return {};
   }
@@ -134,7 +135,7 @@ std::vector<StateInterface> ContactSensor::export_state_interfaces()
   return { state_if };
 }
 
-return_type ContactSensor::read(const rclcpp::Time& time, const rclcpp::Duration& period)
+return_type ContactSensorHardwareInterface::read(const rclcpp::Time& time, const rclcpp::Duration& period)
 {
   (void)time;
   (void)period;
@@ -142,18 +143,18 @@ return_type ContactSensor::read(const rclcpp::Time& time, const rclcpp::Duration
   return return_type::OK;
 }
 
-bool ContactSensor::open_udp(int port)
+bool ContactSensorHardwareInterface::open_udp(int port)
 {
-  sock_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+  sock_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);                                          
   if (sock_fd_ < 0) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "socket() failed: %s", std::strerror(errno));
     return false;
   }
 
   int opt = 1;
   if (::setsockopt(sock_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-    RCLCPP_WARN(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_WARN(rclcpp::get_logger("ContactSensorHardwareInterface"),
                 "setsockopt(SO_REUSEADDR) failed: %s", std::strerror(errno));
   }
 
@@ -163,19 +164,19 @@ bool ContactSensor::open_udp(int port)
   addr.sin_addr.s_addr = htonl(INADDR_ANY); 
 
   if (::bind(sock_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensor"),
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "bind() failed on port %d: %s", port, std::strerror(errno));
     ::close(sock_fd_);
     sock_fd_ = -1;
     return false;
   }
 
-  RCLCPP_INFO(rclcpp::get_logger("ContactSensor"),
+  RCLCPP_INFO(rclcpp::get_logger("ContactSensorHardwareInterface"),
               "UDP listening on 0.0.0.0:%u", static_cast<unsigned>(port));
   return true;
 }
 
-void ContactSensor::rx_thread_fn()
+void ContactSensorHardwareInterface::rx_thread_fn()
 {
   while (rx_running_.load(std::memory_order_relaxed)) {
     fd_set rfds;
@@ -206,7 +207,7 @@ void ContactSensor::rx_thread_fn()
   }
 }
 
-void ContactSensor::close_udp()
+void ContactSensorHardwareInterface::close_udp()
 {
   if (sock_fd_ >= 0) {
     ::close(sock_fd_);
@@ -216,4 +217,4 @@ void ContactSensor::close_udp()
 
 } 
 
-PLUGINLIB_EXPORT_CLASS(contact_sensor::ContactSensor, hardware_interface::SensorInterface)
+PLUGINLIB_EXPORT_CLASS(contact_sensor_hardware_interface::ContactSensorHardwareInterface, hardware_interface::SensorInterface)
