@@ -22,16 +22,16 @@
 #include <cstring>
 #include <chrono>
 
-namespace contact_sensor
+namespace contact_sensor_hardware_interface
 {
 
-class ContactSensor final : public hardware_interface::SensorInterface
+class ContactSensorHardwareInterface final : public hardware_interface::SensorInterface
 {
 public:
-  ContactSensor() = default;
-  ~ContactSensor() override;
+  ContactSensorHardwareInterface() = default;
+  ~ContactSensorHardwareInterface() override;
 
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
+  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;              
   hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
 
