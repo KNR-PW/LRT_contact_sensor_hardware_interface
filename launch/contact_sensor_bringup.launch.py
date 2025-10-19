@@ -5,6 +5,7 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 
+
 def generate_launch_description():
     pkg_share = get_package_share_directory('contact_sensor_hardware_interface')
 
@@ -22,31 +23,40 @@ def generate_launch_description():
         description='Port UDP nasłuchu dla ContactSensor.'
     )
 
+    sensor_ids = DeclareLaunchArgument(
+        'sensor_ids',
+        default_value='1,2,3,4',
+        description='Lista ID czujników w kolejności kanałów (front_left, front_right, rear_left, rear_right).'
+    )
+
     robot_description_content = Command([
         FindExecutable(name='xacro'), ' ',
         LaunchConfiguration('urdf'), ' ',
-        'bind_port:=', LaunchConfiguration('bind_port')
+        'bind_port:=', LaunchConfiguration('bind_port'), ' ',
+        'sensor_ids:=', LaunchConfiguration('sensor_ids')
     ])
     robot_description = {'robot_description': ParameterValue(robot_description_content, value_type=str)}
 
     controller_manager_node = Node(
         package='controller_manager',
         executable='ros2_control_node',
-        parameters=[robot_description,
-                    PathJoinSubstitution([pkg_share, 'config', 'contact_sensor_controllers.yaml'])],
+        parameters=[
+            robot_description,
+            PathJoinSubstitution([pkg_share, 'config', 'contact_sensor_controllers.yaml'])
+        ],
         output='screen',
     )
 
-
     joint_state_broadcaster_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
+        package='controller_manager',
+        executable='spawner',
+        arguments=['joint_state_broadcaster', '--controller-manager', '/controller_manager'],
     )
 
     return LaunchDescription([
         urdf,
         bind_port,
+        sensor_ids,  
         controller_manager_node,
         joint_state_broadcaster_spawner,
     ])

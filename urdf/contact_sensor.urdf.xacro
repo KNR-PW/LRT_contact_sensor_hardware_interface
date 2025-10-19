@@ -2,12 +2,14 @@
 <robot name="contact_sensor" xmlns:xacro="http://ros.org/wiki/xacro">
   <ros2_control name="ContactSensor" type="sensor">
     <hardware>
-      <plugin>contact_sensor::ContactSensor</plugin>
-      <param name="bind_port">5005</param>
+      <plugin>contact_sensor_hardware_interface::ContactSensorHardwareInterface</plugin>
+      <param name="bind_port">${bind_port}</param>
+      <param name="sensor_ids">${sensor_ids}</param>
     </hardware>
-    <sensor name="foot_contact">
-      <state_interface name="contact"/>
-    </sensor>
-  </ros2_control>
 
+    <sensor name="front_left">   <state_interface name="contact"/></sensor>
+    <sensor name="front_right">  <state_interface name="contact"/></sensor>
+    <sensor name="rear_left">    <state_interface name="contact"/></sensor>
+    <sensor name="rear_right">   <state_interface name="contact"/></sensor>
+  </ros2_control>
 </robot>

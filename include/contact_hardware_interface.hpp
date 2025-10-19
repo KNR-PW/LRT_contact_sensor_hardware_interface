@@ -21,6 +21,13 @@
 #include <cerrno>
 #include <cstring>
 #include <chrono>
+#include <unordered_map>
+
+struct __attribute__((packed)) UdpMsgV1
+{
+  uint16_t sensor_id;  
+  uint8_t  contact;    
+};
 
 namespace contact_sensor_hardware_interface
 {
@@ -31,7 +38,7 @@ public:
   ContactSensorHardwareInterface() = default;
   ~ContactSensorHardwareInterface() override;
 
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;              
+  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;              // Wywołuje implementacje klasy bazowej, kopiuje hardware_info do info_
   hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
 
@@ -44,9 +51,10 @@ private:
   void close_udp();
   void rx_thread_fn();
 
-  double contact_state_{0.0};                    
-  std::atomic<uint8_t> onContact_{0};            
-
+  std::vector<double> contacts_;
+  std::vector<std::atomic<uint8_t>> on_contacts_; 
+  std::unordered_map<uint16_t, std::size_t> id_to_idx_; 
+          
   std::atomic<bool> connected_{false};
   std::atomic<bool> rx_running_{false};
   std::thread rx_thread_;

@@ -1,4 +1,5 @@
 #include "contact_hardware_interface.hpp"
+#include <sstream> 
 
 namespace contact_sensor_hardware_interface
 
@@ -29,12 +30,6 @@ CallbackReturn ContactSensorHardwareInterface::on_init(const hardware_interface:
     RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"), "No <sensor> entries in ros2_control block.");
     return CallbackReturn::ERROR;
   }
-  if (hardware_info.sensors[0].state_interfaces.empty() ||
-      hardware_info.sensors[0].state_interfaces[0].name != "contact") {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
-                 "Expected state_interface named 'contact' for the first sensor.");
-    return CallbackReturn::ERROR;
-  }
 
   auto it = hardware_info.hardware_parameters.find("bind_port");
   if (it == hardware_info.hardware_parameters.end()) {
@@ -55,9 +50,46 @@ CallbackReturn ContactSensorHardwareInterface::on_init(const hardware_interface:
     return CallbackReturn::ERROR;
   }
 
-  onContact_.store(0, std::memory_order_relaxed);
-  contact_state_ = 0.0;
+  auto it_ids = hardware_info.hardware_parameters.find("sensor_ids");
+  if (it_ids == hardware_info.hardware_parameters.end()) {
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
+                 "Missing parameter: sensor_ids (comma-separated, e.g. \"1,2,3,4\")");
+    return CallbackReturn::ERROR;
+  }
+
+  std::vector<uint16_t> ids;
+  {
+    std::stringstream ss(it_ids->second);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+      tok.erase(0, tok.find_first_not_of(" \t"));
+      tok.erase(tok.find_last_not_of(" \t") + 1);
+      if (tok.empty()) continue;
+      uint16_t id = static_cast<uint16_t>(std::stoi(tok));
+      ids.push_back(id);
+    }  
+  }
+
+  if (ids.size() != hardware_info.sensors.size()) {
+    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
+                 "sensor_ids count (%zu) != number of <sensor> entries (%zu).",
+                 ids.size(), hardware_info.sensors.size());
+    return CallbackReturn::ERROR;
+  }
+
+  contacts_.assign(ids.size(), 0.0);
+  on_contacts_.resize(ids.size());
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    on_contacts_[i].store(0, std::memory_order_relaxed);
+  }
+
+  id_to_idx_.clear();
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    id_to_idx_[ids[i]] = i;
+  }
+
   state_seq_.store(0, std::memory_order_relaxed);
+  connected_.store(false, std::memory_order_relaxed);
 
   return CallbackReturn::SUCCESS;
 }
@@ -124,28 +156,26 @@ CallbackReturn ContactSensorHardwareInterface::on_deactivate(const rclcpp_lifecy
 
 std::vector<StateInterface> ContactSensorHardwareInterface::export_state_interfaces()
 {
-  if (info_.sensors.empty()) {
-    RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
-                 "No sensors in hardware info.");
-    return {};
+  std::vector<StateInterface> result;
+  result.reserve(info_.sensors.size());
+  for (std::size_t i = 0; i < info_.sensors.size(); ++i) {
+    result.emplace_back(info_.sensors[i].name, "contact", &contacts_[i]);
   }
-
-  const std::string& sensor_name = info_.sensors[0].name;
-  StateInterface state_if(sensor_name, "contact", &contact_state_);
-  return { state_if };
+  return result;
 }
 
 return_type ContactSensorHardwareInterface::read(const rclcpp::Time& time, const rclcpp::Duration& period)
 {
-  (void)time;
-  (void)period;
-  contact_state_ = onContact_.load(std::memory_order_relaxed) ? 1.0 : 0.0;
+  for (std::size_t i = 0; i < on_contacts_.size(); ++i) {
+    contacts_[i] = on_contacts_[i].load(std::memory_order_relaxed) ? 1.0 : 0.0;
+  }
+
   return return_type::OK;
 }
 
 bool ContactSensorHardwareInterface::open_udp(int port)
 {
-  sock_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);                                          
+  sock_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);                                          // Wywołuje globalną funkcje POSIX z parametrami (IPV4, SOCKDRAM (TYP GNIAZDA DATAGRAMOWEGO UDP), 0 CZYLI DOMYŚLNY)                                                                    
   if (sock_fd_ < 0) {
     RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "socket() failed: %s", std::strerror(errno));
@@ -153,17 +183,17 @@ bool ContactSensorHardwareInterface::open_udp(int port)
   }
 
   int opt = 1;
-  if (::setsockopt(sock_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+  if (::setsockopt(sock_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {         // SO_REUSEADDR - szybkie ponowne użycie adresu/portu, współdzielenie wielu gniazd
     RCLCPP_WARN(rclcpp::get_logger("ContactSensorHardwareInterface"),
                 "setsockopt(SO_REUSEADDR) failed: %s", std::strerror(errno));
   }
 
   sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port   = htons(static_cast<uint16_t>(port));
-  addr.sin_addr.s_addr = htonl(INADDR_ANY); 
+  addr.sin_family = AF_INET;                                                            // Rodzina adresów IPV4
+  addr.sin_port   = htons(static_cast<uint16_t>(port));                                 // ODBIÓR DANYCH, HOST TO NETWORK SHORT (16 BITÓW), CZYLI OD BAJTA NAJBARDZIEJ ZNACZACEGO 
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);                                             // ODBIÓR  DANYCH (32 BITY), DOWOLNY ADRES INADDR_ANY
 
-  if (::bind(sock_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+  if (::bind(sock_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {         // BIND -> MÓWI KERNELOWI, UZYWAJ TEGO ADRESU I PORTU W GNIEŹDZIE 
     RCLCPP_ERROR(rclcpp::get_logger("ContactSensorHardwareInterface"),
                  "bind() failed on port %d: %s", port, std::strerror(errno));
     ::close(sock_fd_);
@@ -179,12 +209,13 @@ bool ContactSensorHardwareInterface::open_udp(int port)
 void ContactSensorHardwareInterface::rx_thread_fn()
 {
   while (rx_running_.load(std::memory_order_relaxed)) {
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(sock_fd_, &rfds);
-    timeval tv{0, 100000};
+    fd_set rfds;                                                                        // BITOWA MASKA DESKRYPTORÓW PLIKÓW (TU GNIAZD), KTÓRE CHCESZ OBSERWOWAĆ POD KĄTEM CZYTANIA
+    FD_ZERO(&rfds);                                                                     // ZERUJE MASKE
+    FD_SET(sock_fd_, &rfds);                                                            // DODANIE SOCKETU UDP DO CZYTANIA
+    timeval tv{0, 100000};                                                              // USTAWIA TIMEOUT DLA SELECT()
 
-    int ready = ::select(sock_fd_ + 1, &rfds, nullptr, nullptr, &tv);
+    // select() „przycina” przekazane maski i wstawia w nich tylko te deskryptory, które są gotowe.
+    int ready = ::select(sock_fd_ + 1, &rfds, nullptr, nullptr, &tv);                   // DESKRYPTOR (+ 1 BO CZYTAMY OD 0 DO -1), MASKA, NULL BO NIE OBSERWUJEMY DESKRYPTORÓW DO PISANIA + TIMEOUT
     if (ready < 0) {
       if (errno == EINTR) continue; 
       break;
@@ -194,14 +225,20 @@ void ContactSensorHardwareInterface::rx_thread_fn()
     }
 
     if (FD_ISSET(sock_fd_, &rfds)) {
-      uint8_t byte{};
+      UdpMsgV1 msg{};
       sockaddr_in peer{};
       socklen_t plen = sizeof(peer);
-      const ssize_t n = ::recvfrom(sock_fd_, &byte, 1, 0,
-                                   reinterpret_cast<sockaddr*>(&peer), &plen);
-      if (n == 1) {
-        onContact_.store(byte ? 1 : 0, std::memory_order_relaxed);
-        state_seq_.fetch_add(1, std::memory_order_relaxed);
+
+      const ssize_t n = ::recvfrom(
+          sock_fd_, &msg, sizeof(msg), 0,
+          reinterpret_cast<sockaddr*>(&peer), &plen);
+
+      if (n == static_cast<ssize_t>(sizeof(msg))) {
+        auto it = id_to_idx_.find(msg.sensor_id);
+        if (it != id_to_idx_.end()) {
+          on_contacts_[it->second].store(msg.contact ? 1 : 0, std::memory_order_relaxed);
+          state_seq_.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     }
   }
