@@ -1,13 +1,44 @@
 <?xml version="1.0"?>
 <robot name="contact_sensor" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="bind_port" default="5005" />
+
+  <link name="base_link"/>
+
+  <link name="front_left_link"/>
+  <link name="front_right_link"/>
+  <link name="rear_left_link"/>
+  <link name="rear_right_link"/>
+
+  <joint name="fl_joint" type="fixed"> <parent link="base_link"/> <child link="front_left_link"/> </joint>
+  <joint name="fr_joint" type="fixed"> <parent link="base_link"/> <child link="front_right_link"/> </joint>
+  <joint name="rl_joint" type="fixed"> <parent link="base_link"/> <child link="rear_left_link"/> </joint>
+  <joint name="rr_joint" type="fixed"> <parent link="base_link"/> <child link="rear_right_link"/> </joint>
+
   <ros2_control name="ContactSensor" type="sensor">
     <hardware>
-      <plugin>contact_sensor::ContactSensor</plugin>
-      <param name="bind_port">5005</param>
+      <plugin>contact_sensor_hardware_interface::ContactSensorHardwareInterface</plugin>
+      <param name="bind_port">$(arg bind_port)</param>
     </hardware>
-    <sensor name="foot_contact">
+
+    <sensor name="front_left">
       <state_interface name="contact"/>
+      <param name="sensor_id">1</param>
+    </sensor>
+    
+    <sensor name="front_right">
+      <state_interface name="contact"/>
+      <param name="sensor_id">2</param>
+    </sensor>
+    
+    <sensor name="rear_left">
+      <state_interface name="contact"/>
+      <param name="sensor_id">3</param>
+    </sensor>
+    
+    <sensor name="rear_right">
+      <state_interface name="contact"/>
+      <param name="sensor_id">4</param>
     </sensor>
   </ros2_control>
-
 </robot>

@@ -4,3 +4,20 @@ controller_manager:
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
+
+    contact_sensors_broadcaster:
+      type: contact_sensors_broadcaster/ContactSensorsBroadcaster
+
+contact_sensors_broadcaster:
+  ros__parameters:
+    sensor_names:
+      - front_left
+      - front_right
+      - rear_left
+      - rear_right
+    
+    frame_ids:
+      - front_left_link
+      - front_right_link
+      - rear_left_link
+      - rear_right_link
