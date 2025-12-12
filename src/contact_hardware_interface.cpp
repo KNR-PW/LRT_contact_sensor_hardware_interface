@@ -86,6 +86,18 @@ std::vector<StateInterface> ContactSensorHardwareInterface::export_state_interfa
 return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclcpp::Duration&)
 {
   if (sock_fd_ < 0) {
+    if (serverPortNum_ > 0) {
+      if (!open_udp(serverPortNum_)) {
+        RCLCPP_ERROR(
+          rclcpp::get_logger("ContactSensorHardwareInterface"),
+          "Failed to (re)open UDP socket on port %d", serverPortNum_);
+      } else {
+        RCLCPP_WARN(
+          rclcpp::get_logger("ContactSensorHardwareInterface"),
+          "UDP socket on port %d reopened successfully", serverPortNum_);
+      }
+    }
+
     return return_type::OK;
   }
 
@@ -95,32 +107,57 @@ return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclc
   socklen_t plen = sizeof(peer);
 
   while (true) {
-    ssize_t n = ::recvfrom(sock_fd_, &msg, sizeof(msg), 0, 
+    ssize_t n = ::recvfrom(sock_fd_, &msg, sizeof(msg), 0,
                            reinterpret_cast<sockaddr*>(&peer), &plen);
 
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        break; 
+        break;
       }
 
+      RCLCPP_ERROR(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "recvfrom() failed: %s. Closing UDP socket; will attempt reopen on next read().",
+        std::strerror(errno));
+
+      close_udp();
       break;
     }
 
-    if (n == sizeof(msg)) {
-      auto it = id_to_idx_.find(msg.sensor_id);
-      if (it != id_to_idx_.end()) {
-        contacts_[it->second] = (msg.contact != 0) ? 1.0 : 0.0;
+    if (n != static_cast<ssize_t>(sizeof(msg))) {
+      RCLCPP_WARN(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "Received UDP packet of size %zd (expected %zu) – ignoring.",
+        n, sizeof(msg));
+      continue;
+    }
 
-        ack_msg.sensor_id_ack = msg.sensor_id;
-        
-        ::sendto(sock_fd_, &ack_msg, sizeof(ack_msg), 0,
-                 reinterpret_cast<sockaddr*>(&peer), plen);
-      }
+    auto it = id_to_idx_.find(msg.sensor_id);
+    if (it == id_to_idx_.end()) {
+      RCLCPP_WARN(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "Received message from unknown sensor_id=%u – ignoring.",
+        static_cast<unsigned int>(msg.sensor_id));
+      continue;
+    }
+
+    const std::size_t idx = it->second;
+
+    contacts_[idx] = (msg.contact != 0) ? 1.0 : 0.0;
+
+    ack_msg.sensor_id_ack = msg.sensor_id;
+    if (::sendto(sock_fd_, &ack_msg, sizeof(ack_msg), 0,
+                 reinterpret_cast<sockaddr*>(&peer), plen) < 0) {
+      RCLCPP_WARN(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "sendto() ACK failed for sensor_id=%u: %s",
+        static_cast<unsigned int>(msg.sensor_id),
+        std::strerror(errno));
     }
   }
-
   return return_type::OK;
 }
+
 
 bool ContactSensorHardwareInterface::open_udp(int port)
 {
