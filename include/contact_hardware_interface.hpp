@@ -18,9 +18,23 @@
 #include <arpa/inet.h>
 #include <sys/select.h>
 #include <unistd.h>
+#include <fcntl.h>
+
 #include <cerrno>
 #include <cstring>
 #include <chrono>
+#include <unordered_map>
+
+struct __attribute__((packed)) UdpMsgV1
+{
+  uint16_t sensor_id;  
+  uint8_t  contact;    
+};
+
+struct __attribute__((packed)) UdpAck
+{
+  uint16_t sensor_id_ack;
+};
 
 namespace contact_sensor_hardware_interface
 {
@@ -31,7 +45,7 @@ public:
   ContactSensorHardwareInterface() = default;
   ~ContactSensorHardwareInterface() override;
 
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;              
+  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;             
   hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
 
@@ -42,16 +56,11 @@ public:
 private:
   bool open_udp(int port);
   void close_udp();
-  void rx_thread_fn();
 
-  double contact_state_{0.0};                    
-  std::atomic<uint8_t> onContact_{0};            
-
-  std::atomic<bool> connected_{false};
-  std::atomic<bool> rx_running_{false};
-  std::thread rx_thread_;
-  std::atomic<uint64_t> state_seq_{0};           
-
+  std::vector<double> contacts_;
+  
+  std::unordered_map<uint16_t, std::size_t> id_to_idx_; 
+                    
   int sock_fd_{-1};
 
   int serverPortNum_{0};
