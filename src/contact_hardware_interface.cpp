@@ -85,17 +85,90 @@ std::vector<StateInterface> ContactSensorHardwareInterface::export_state_interfa
 
 return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclcpp::Duration&)
 {
-  if (sock_fd_ < 0) {
-    if (serverPortNum_ > 0) {
-      if (!open_udp(serverPortNum_)) {
-        RCLCPP_ERROR(
-          rclcpp::get_logger("ContactSensorHardwareInterface"),
-          "Failed to (re)open UDP socket on port %d", serverPortNum_);
-      } else {
-        RCLCPP_WARN(
-          rclcpp::get_logger("ContactSensorHardwareInterface"),
-          "UDP socket on port %d reopened successfully", serverPortNum_);
+
+  struct Sample
+  {
+    uint32_t recv_calls = 0;   
+    uint32_t datagrams = 0;    
+    uint32_t drops = 0;        
+    uint32_t ack_fail = 0;     
+    uint32_t recv_err = 0;     
+  };
+
+  struct Window
+  {
+    using Steady = std::chrono::steady_clock;
+
+    Steady::time_point t0 = Steady::now();
+    uint64_t reads = 0;
+    uint64_t recv_calls = 0;
+    uint64_t datagrams = 0;
+    uint64_t drops = 0;
+    uint64_t ack_fail = 0;
+    uint64_t recv_err = 0;
+    uint64_t max_datagrams_in_read = 0;
+
+    void add(const Sample& s)
+    {
+      reads += 1;
+      recv_calls += s.recv_calls;
+      datagrams += s.datagrams;
+      drops += s.drops;
+      ack_fail += s.ack_fail;
+      recv_err += s.recv_err;
+      if (s.datagrams > max_datagrams_in_read) {
+        max_datagrams_in_read = s.datagrams;
       }
+    }
+
+    void maybe_log()
+    {
+      const auto now = Steady::now();
+      const double elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(now - t0).count();
+
+      if (elapsed < 1.0) {
+        return;
+      }
+
+      const double read_hz = (elapsed > 0.0) ? static_cast<double>(reads) / elapsed : 0.0;
+      const double datagrams_per_read = (reads > 0) ? static_cast<double>(datagrams) / static_cast<double>(reads) : 0.0;
+      const double recv_calls_per_read = (reads > 0) ? static_cast<double>(recv_calls) / static_cast<double>(reads) : 0.0;
+
+      RCLCPP_INFO(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "HI stats(%.1fs): read_hz=%.1f datagrams/read=%.2f recv_calls/read=%.2f max_datagrams/read=%llu "
+        "drops=%llu ack_fail=%llu recv_err=%llu",
+        elapsed, read_hz, datagrams_per_read, recv_calls_per_read,
+        static_cast<unsigned long long>(max_datagrams_in_read),
+        static_cast<unsigned long long>(drops),
+        static_cast<unsigned long long>(ack_fail),
+        static_cast<unsigned long long>(recv_err));
+
+      t0 = now;
+      reads = 0;
+      recv_calls = 0;
+      datagrams = 0;
+      drops = 0;
+      ack_fail = 0;
+      recv_err = 0;
+      max_datagrams_in_read = 0;
+    }
+  };
+
+  static Window w;
+  Sample s;
+
+  if (sock_fd_ < 0 && serverPortNum_ > 0) {
+    if (!open_udp(serverPortNum_)) {
+      RCLCPP_ERROR(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "Failed to (re)open UDP socket on port %d", serverPortNum_);
+    } 
+    else {
+      RCLCPP_WARN(
+        rclcpp::get_logger("ContactSensorHardwareInterface"),
+        "UDP socket on port %d reopened successfully", serverPortNum_);
     }
 
     return return_type::OK;
@@ -107,13 +180,18 @@ return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclc
   socklen_t plen = sizeof(peer);
 
   while (true) {
+    s.recv_calls++;
+
     ssize_t n = ::recvfrom(sock_fd_, &msg, sizeof(msg), 0,
                            reinterpret_cast<sockaddr*>(&peer), &plen);
 
     if (n < 0) {
+      
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         break;
       }
+
+      s.recv_err++;
 
       RCLCPP_ERROR(
         rclcpp::get_logger("ContactSensorHardwareInterface"),
@@ -125,6 +203,7 @@ return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclc
     }
 
     if (n != static_cast<ssize_t>(sizeof(msg))) {
+      s.drops++;
       RCLCPP_WARN(
         rclcpp::get_logger("ContactSensorHardwareInterface"),
         "Received UDP packet of size %zd (expected %zu) – ignoring.",
@@ -134,6 +213,7 @@ return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclc
 
     auto it = id_to_idx_.find(msg.sensor_id);
     if (it == id_to_idx_.end()) {
+      s.drops++;
       RCLCPP_WARN(
         rclcpp::get_logger("ContactSensorHardwareInterface"),
         "Received message from unknown sensor_id=%u – ignoring.",
@@ -148,13 +228,19 @@ return_type ContactSensorHardwareInterface::read(const rclcpp::Time&, const rclc
     ack_msg.sensor_id_ack = msg.sensor_id;
     if (::sendto(sock_fd_, &ack_msg, sizeof(ack_msg), 0,
                  reinterpret_cast<sockaddr*>(&peer), plen) < 0) {
+      s.ack_fail++;
       RCLCPP_WARN(
         rclcpp::get_logger("ContactSensorHardwareInterface"),
         "sendto() ACK failed for sensor_id=%u: %s",
         static_cast<unsigned int>(msg.sensor_id),
         std::strerror(errno));
     }
+    s.datagrams++;
   }
+
+  w.add(s);
+  w.maybe_log();
+
   return return_type::OK;
 }
 
