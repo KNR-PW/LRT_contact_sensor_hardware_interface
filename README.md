@@ -30,7 +30,7 @@ This repository provides **only** the hardware interface. The controller/broadca
 
 ```bash
 cd ~/ros2_ws/src
-git clone <THIS_REPOSITORY_URL>
+git clone https://github.com/KNR-PW/LRT_contact_sensor_hardware_interface.git
 
 # Optional (only if you want to publish ROS messages)
 git clone https://github.com/BartlomiejK2/contact_msgs.git
